@@ -1,0 +1,26 @@
+# Environment variables
+.env
+
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+venv/
+env/
+
+# Chroma / vector database
+chroma_db/
+*.sqlite3
+*.sqlite
+
+# Node.js
+node_modules/
+
+
+
+
+
+
+

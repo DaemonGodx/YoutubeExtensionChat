@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <meta charset="UTF-8">
+    <title>YouTube Chat</title>
+    <link rel="stylesheet" href="popup.css">
+</head>
+
+<body>
+
+    <!-- Header -->
+    <header class="header">
+
+        <div class="brand">
+
+            <div class="brand-icon">
+                ▶
+            </div>
+
+            <div class="brand-info">
+                <div class="brand-name">
+                    YouTube Chat
+                </div>
+
+                <div class="brand-subtitle">
+                    AI video assistant
+                </div>
+            </div>
+
+        </div>
+
+        <div class="status">
+            <span class="status-dot"></span>
+            Online
+        </div>
+
+    </header>
+
+
+    <!-- Video information -->
+    <div class="video-card">
+
+        <div class="video-icon">
+            🎬
+        </div>
+
+        <div class="video-details">
+
+            <div class="video-label">
+                CURRENT VIDEO
+            </div>
+
+            <div id="video" class="video-id">
+                Detecting video...
+            </div>
+
+        </div>
+
+    </div>
+
+
+    <!-- Chat -->
+    <main id="chat">
+
+        <div class="welcome">
+
+            <div class="welcome-icon">
+                ✦
+            </div>
+
+            <h2>
+                How can I help?
+            </h2>
+
+            <p>
+                Ask me about the video or start
+                a normal conversation.
+            </p>
+
+            <div class="suggestions">
+
+                <button class="suggestion">
+                    Summarize this video
+                </button>
+
+                <button class="suggestion">
+                    What are the main points?
+                </button>
+
+                <button class="suggestion">
+                    What did you think about it?
+                </button>
+
+            </div>
+
+        </div>
+
+    </main>
+
+
+    <!-- Input -->
+    <footer class="input-area">
+
+        <div class="input-wrapper">
+
+            <input
+                id="question"
+                type="text"
+                placeholder="Ask anything..."
+                autocomplete="off"
+            />
+
+            <button
+                id="send"
+                class="send-button"
+                aria-label="Send"
+            >
+                <svg
+                    width="16"
+                    height="16"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="2"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                >
+                    <line x1="22" y1="2" x2="11" y2="13"></line>
+                    <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
+                </svg>
+            </button>
+
+        </div>
+
+        <div class="input-hint">
+            Press <kbd>Enter</kbd> to send
+        </div>
+
+    </footer>
+
+
+    <script src="popup.js"></script>
+
+</body>
+
+</html>
