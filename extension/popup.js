@@ -1,5 +1,5 @@
 let videoId = null;
-const API_BASE_URL = "https://youtube-chat-api.onrender.com";
+const API_BASE_URL = "https://youtube-chat-api-siqa.onrender.com";
 
 
 function getVideoId(url) {
