@@ -4,7 +4,7 @@
     // Chrome does not load .env files. Select local or demo here, then reload
     // the unpacked extension from chrome://extensions.
     const config = Object.freeze({
-        mode: "local",
+        mode: "demo",
         apiBaseUrls: Object.freeze({
             local: "http://localhost:3000",
             demo: "https://youtube-chat-api-siqa.onrender.com"
