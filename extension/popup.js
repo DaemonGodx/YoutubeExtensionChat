@@ -81,38 +81,41 @@ async function getTranscript() {
                         return { error: `YouTube captions returned HTTP ${response.status}.` };
                     }
 
-                    const body = await response.text();
-                    let lines = [];
-
-                    try {
-                        const captions = JSON.parse(body);
-                        lines = (captions.events || [])
-                            .flatMap((event) => event.segs || [])
-                            .map((segment) => segment.utf8?.trim())
-                            .filter(Boolean);
-                    } catch {
-                        const doc = new DOMParser().parseFromString(body, "text/xml");
-                        lines = Array.from(doc.querySelectorAll("text, p"))
-                            .map((element) => element.textContent?.trim())
-                            .filter(Boolean);
-                    }
-
-                    if (!lines.length) {
-                        return { error: "YouTube returned an empty caption track for this video." };
-                    }
-
-                    return { transcript: lines.join(" ") };
+                    return { body: await response.text() };
                 } catch (error) {
                     return { error: error?.message || "YouTube caption extraction failed." };
                 }
             }
         });
 
-        if (!result?.result?.transcript) {
+        if (result?.result?.error) {
+            throw new Error(result.result.error);
+        }
+
+        const body = result?.result?.body;
+        if (typeof body !== "string" || !body) {
             throw new Error(result?.result?.error || "Could not read captions from this video.");
         }
 
-        return result.result.transcript;
+        let lines = [];
+        try {
+            const captions = JSON.parse(body);
+            lines = (captions.events || [])
+                .flatMap((event) => event.segs || [])
+                .map((segment) => segment.utf8?.trim())
+                .filter(Boolean);
+        } catch {
+            const doc = new DOMParser().parseFromString(body, "text/xml");
+            lines = Array.from(doc.querySelectorAll("text, p"))
+                .map((element) => element.textContent?.trim())
+                .filter(Boolean);
+        }
+
+        if (!lines.length) {
+            throw new Error("YouTube returned an empty caption track for this video.");
+        }
+
+        return lines.join(" ");
     })().catch((error) => {
         transcriptPromise = null;
         throw error;
