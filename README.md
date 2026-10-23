@@ -28,7 +28,7 @@ Ask questions about a video's transcript and get context-aware answers. The exte
 ┌──────────────────────────────┐
 │      Chrome Extension        │
 │                              │
-│  Popup UI + User Questions   │
+│ Captions + Popup Question   │
 └──────────────┬───────────────┘
                │ HTTP
                ▼
@@ -42,22 +42,8 @@ Ask questions about a video's transcript and get context-aware answers. The exte
 ┌──────────────────────────────┐
 │       Python / FastAPI       │
 │                              │
-│          RAG System          │
-└──────────────┬───────────────┘
-               │
-               ▼
-┌──────────────────────────────┐
-│      YouTube Transcript      │
-│                              │
-│   Cleaning → Chunking        │
-│          ↓                   │
-│       Embeddings             │
-│          ↓                   │
-│         Chroma               │
-│          ↓                   │
-│       Retrieval              │
-│          ↓                   │
-│       Groq LLM               │
+│ Chunk → Embed → Retrieve     │
+│        → Groq LLM            │
 └──────────────────────────────┘
 ```
 
@@ -99,7 +85,7 @@ When you ask a question about a YouTube video, the system follows these steps:
 
 ### 1. Get YouTube Transcript
 
-The Python backend retrieves the transcript using `youtube-transcript-api`.
+The extension reads an available caption track from the active YouTube page and sends its text with the question. This avoids asking Render's cloud IP to fetch YouTube captions, which YouTube may block.
 
 ```text
 YouTube Video
@@ -366,7 +352,7 @@ http://localhost:3000
 The repository includes a Render Blueprint (`render.yaml`) that creates two web services:
 
 - `youtube-chat-rag` runs the FastAPI and RAG backend.
-- `youtube-chat-api` runs the public Node.js API and connects to the Python service over Render's private network.
+- `youtube-chat-api` runs the public Node.js API and calls the RAG service's public URL.
 
 To deploy:
 
@@ -414,7 +400,8 @@ The Chrome extension sends questions to the Node.js backend. In the deployed ext
 ```json
 {
   "videoId": "VIDEO_ID",
-  "question": "What is this video about?"
+  "question": "What is this video about?",
+  "transcript": "Caption text read from the active YouTube page"
 }
 ```
 
@@ -423,7 +410,7 @@ The Chrome extension sends questions to the Node.js backend. In the deployed ext
 The Node.js server forwards the request to:
 
 ```text
-POST `/chat` on the RAG backend (localhost in development, or Render's private network in production)
+POST `/chat` on the RAG backend
 ```
 
 using:
@@ -431,7 +418,8 @@ using:
 ```json
 {
   "video_id": "VIDEO_ID",
-  "question": "What is this video about?"
+  "question": "What is this video about?",
+  "transcript": "Caption text read from the active YouTube page"
 }
 ```
 

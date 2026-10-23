@@ -8,7 +8,7 @@ const ragHostport = process.env.RAG_API_HOSTPORT || "127.0.0.1:8000";
 const ragApiUrl = process.env.RAG_API_URL || `http://${ragHostport}/chat`;
 
 app.use(cors());
-app.use(express.json());
+app.use(express.json({ limit: "5mb" }));
 
 
 app.get("/", (req, res) => {
@@ -24,7 +24,7 @@ app.post("/api/chat", async (req, res) => {
 
     try {
 
-        const { videoId, question } = req.body;
+        const { videoId, question, transcript } = req.body;
 
         if (!videoId || !question) {
 
@@ -34,11 +34,18 @@ app.post("/api/chat", async (req, res) => {
 
         }
 
+        if (typeof transcript !== "string" || !transcript.trim()) {
+            return res.status(400).json({
+                error: "Transcript unavailable. Reload the extension on the YouTube video and try again."
+            });
+        }
+
         const response = await axios.post(
             ragApiUrl,
             {
                 video_id: videoId,
-                question: question
+                question: question,
+                transcript: transcript
             }
         );
 
@@ -48,10 +55,10 @@ app.post("/api/chat", async (req, res) => {
 
     } catch (error) {
 
-        console.error(error.message);
+        console.error("RAG request failed:", error.response?.data || error.message);
 
         res.status(500).json({
-            error: "Failed to get answer"
+            error: error.response?.data?.detail || "Failed to get answer"
         });
 
     }

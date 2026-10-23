@@ -5,7 +5,8 @@
     "description": "Chat with YouTube videos using RAG",
 
     "permissions": [
-        "activeTab"
+        "activeTab",
+        "scripting"
     ],
 
     "host_permissions": [

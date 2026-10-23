@@ -1,4 +1,6 @@
 let videoId = null;
+let activeTabId = null;
+let transcriptPromise = null;
 const API_BASE_URL = "https://youtube-chat-api-siqa.onrender.com";
 
 
@@ -30,10 +32,69 @@ async function getCurrentVideo() {
     }
 
     videoId = getVideoId(url);
+    activeTabId = tabs[0].id;
 
     document.getElementById("video").innerText =
         `Video: ${videoId}`;
 
+}
+
+
+async function getTranscript() {
+
+    if (transcriptPromise) {
+        return transcriptPromise;
+    }
+
+    transcriptPromise = (async () => {
+        const [result] = await chrome.scripting.executeScript({
+            target: { tabId: activeTabId },
+            world: "MAIN",
+            func: async () => {
+                const tracks =
+                    window.ytInitialPlayerResponse
+                        ?.captions
+                        ?.playerCaptionsTracklistRenderer
+                        ?.captionTracks;
+
+                if (!tracks?.length) {
+                    throw new Error("This video has no available captions.");
+                }
+
+                const track =
+                    tracks.find((item) => item.languageCode === "en") ||
+                    tracks[0];
+                const response = await fetch(track.baseUrl, { credentials: "include" });
+
+                if (!response.ok) {
+                    throw new Error(`YouTube captions returned ${response.status}.`);
+                }
+
+                const xml = await response.text();
+                const doc = new DOMParser().parseFromString(xml, "text/xml");
+                const lines = Array.from(doc.querySelectorAll("text, p"))
+                    .map((element) => element.textContent?.trim())
+                    .filter(Boolean);
+
+                if (!lines.length) {
+                    throw new Error("No caption text was returned for this video.");
+                }
+
+                return lines.join(" ");
+            }
+        });
+
+        if (!result?.result) {
+            throw new Error("Could not read captions from this video.");
+        }
+
+        return result.result;
+    })().catch((error) => {
+        transcriptPromise = null;
+        throw error;
+    });
+
+    return transcriptPromise;
 }
 
 
@@ -56,6 +117,8 @@ async function askQuestion() {
 
     try {
 
+        const transcript = await getTranscript();
+
         const response = await fetch(
             `${API_BASE_URL}/api/chat`,
             {
@@ -67,15 +130,19 @@ async function askQuestion() {
 
                 body: JSON.stringify({
                     videoId: videoId,
-                    question: question
+                    question: question,
+                    transcript: transcript
                 })
             }
         );
 
         const data = await response.json();
 
-        removeLastMessage();
+        if (!response.ok) {
+            throw new Error(data.error || `Request failed (${response.status}).`);
+        }
 
+        removeLastMessage();
         addMessage("AI", data.answer);
 
     } catch (error) {
@@ -84,7 +151,7 @@ async function askQuestion() {
 
         addMessage(
             "AI",
-            "Something went wrong."
+            error.message || "Something went wrong."
         );
 
         console.error(error);

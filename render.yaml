@@ -22,8 +22,5 @@ services:
     startCommand: npm start
     healthCheckPath: /
     envVars:
-      - key: RAG_API_HOSTPORT
-        fromService:
-          type: web
-          name: youtube-chat-rag
-          property: hostport
+      - key: RAG_API_URL
+        value: https://youtube-chat-rag.onrender.com/chat

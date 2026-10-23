@@ -90,25 +90,23 @@ def get_transcript(video_id):
 # Create Vector Store
 # -----------------------------
 
-def create_vector_store(video_id):
+def create_vector_store(video_id, transcript_text=None):
 
-    # Check cache first
-    if video_id in vector_store_cache:
+    cache_key = f"{video_id}:{hash(transcript_text)}" if transcript_text is not None else video_id
+    if cache_key in vector_store_cache:
 
         print(f"Using cached vector store for {video_id}")
 
-        return vector_store_cache[video_id]
+        return vector_store_cache[cache_key]
 
 
     print(f"Creating vector store for {video_id}")
 
-    # Get transcript
-    transcript_list = get_transcript(video_id)
-
-    transcript = " ".join(
-        chunk["text"]
-        for chunk in transcript_list
-    )
+    if transcript_text is None:
+        transcript_list = get_transcript(video_id)
+        transcript = " ".join(chunk["text"] for chunk in transcript_list)
+    else:
+        transcript = transcript_text
 
 
     # Split transcript
@@ -130,7 +128,7 @@ def create_vector_store(video_id):
 
 
     # Save to cache
-    vector_store_cache[video_id] = vector_store
+    vector_store_cache[cache_key] = vector_store
 
     print(f"Vector store cached for {video_id}")
 
@@ -229,10 +227,11 @@ Answer:
 # Ask Question
 # -----------------------------
 
-def ask_question(video_id, question):
+def ask_question(video_id, question, transcript_text=None):
 
     vector_store = create_vector_store(
-        video_id
+        video_id,
+        transcript_text
     )
 
     chain = create_chain(
