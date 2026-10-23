@@ -85,7 +85,7 @@ When you ask a question about a YouTube video, the system follows these steps:
 
 ### 1. Get YouTube Transcript
 
-The Python backend retrieves the transcript with `youtube-transcript-api` using the video ID sent by the extension.
+The Python backend retrieves the transcript from TranscriptAPI.com using the video ID sent by the extension.
 
 ```text
 YouTube Video
@@ -231,7 +231,7 @@ The question is handled directly by the general conversation chain without query
 - Chroma
 - Hugging Face Embeddings
 - Groq
-- YouTube Transcript API
+- TranscriptAPI.com
 
 ---
 
@@ -279,35 +279,15 @@ pip install -r requirements.txt
 
 ---
 
-# 🔐 3. Configure Environment Variables
+# 🔐 3. Configure Local Environment Variables
 
-Create a `.env` file in the project root:
+Use `.env.example` as a template for `.env` in the repository root. If you already have `.env`, keep it and add or update the listed settings instead of replacing it:
 
-```text
-.env
+```powershell
+Copy-Item .env.example .env
 ```
 
-Add your API credentials:
-
-```env
-GROQ_API_KEY=your_groq_api_key
-GOOGLE_API_KEY=your_google_ai_studio_api_key
-TRANSCRIPT_PROXY_URL=
-```
-
-Never commit your `.env` file.
-
-You can provide a safe example file such as:
-
-```text
-.env.example
-```
-
-```env
-GROQ_API_KEY=
-GOOGLE_API_KEY=
-TRANSCRIPT_PROXY_URL=
-```
+Set `GOOGLE_API_KEY`, `GROQ_API_KEY`, and `TRANSCRIPT_API_KEY` in `.env`. The example also sets `PORT=3000` and `RAG_API_URL=http://localhost:8000/chat`, so the local Node service forwards to the local Python service. Both services load the root `.env`. Never commit `.env`; it is ignored by Git.
 
 ---
 
@@ -360,13 +340,39 @@ To deploy:
 
 1. Push this repository, including `render.yaml`, to a Git provider connected to Render.
 2. In the Render Dashboard, choose **New → Blueprint**, connect the repository, and apply the Blueprint.
-3. Enter your `GROQ_API_KEY` and `GOOGLE_API_KEY` when prompted. These are required by the chat and embedding models. `TRANSCRIPT_PROXY_URL` is optional; set it to the authenticated proxy URL in Render's environment settings if using a proxy. Leave it blank for direct connections. Never commit the authenticated URL.
-4. Wait for both services to finish deploying. The public API URL is `https://youtube-chat-api.onrender.com` unless Render reports a different hostname.
-5. If Render assigned a different hostname, update `API_BASE_URL` in `extension/popup.js` and the matching host permission in `extension/manifest.json`, push the changes, and reload the unpacked extension in Chrome.
+3. Enter `GROQ_API_KEY`, `GOOGLE_API_KEY`, and `TRANSCRIPT_API_KEY` in the RAG service's environment settings. Add `TRANSCRIPT_API_KEY` to the Python RAG service only; keep it out of the Node service and extension.
+4. Wait for both services to finish deploying. This repository's current extension demo URL is `https://youtube-chat-api-siqa.onrender.com`; the Node service forwards to `https://youtube-chat-rag.onrender.com/chat` through `render.yaml`.
+5. Set `mode` to `"demo"` in `extension/config.js`, then reload the unpacked extension in Chrome. If Render changes the Node service hostname, update `demo` in that config and the matching host permission in `extension/manifest.json`.
 
 The Blueprint uses Render's free service plan. Free services can spin down when idle, so the first request after inactivity may take longer.
 
-The Python service reads `TRANSCRIPT_PROXY_URL` when retrieving YouTube captions. It uses `youtube-transcript-api`'s `GenericProxyConfig` for both HTTP and HTTPS requests when the value is set. A proxy can still be blocked by YouTube; a successful deployment or unit test does not confirm that a particular proxy IP can retrieve captions.
+Render may be unable to retrieve some YouTube transcripts because YouTube blocks requests from cloud-provider IPs. The extension can still reach the deployed services even when a transcript request fails.
+
+## Local and Demo Modes
+
+The extension is Manifest V3 and has no build step, so Chrome does not read `.env` for the extension. Its mode is selected in `extension/config.js`:
+
+```js
+mode: "local", // or "demo"
+```
+
+### Local usage
+
+1. Copy `.env.example` to `.env` and set your Google, Groq, and TranscriptAPI keys.
+2. In `extension/config.js`, leave `mode` set to `"local"`.
+3. Start FastAPI from the repository root: `uvicorn rag.app:app --reload --port 8000`.
+4. In a second terminal at the repository root, start Node: `npm start`.
+5. Reload the unpacked extension from `chrome://extensions` and open a YouTube video.
+
+The extension calls `http://localhost:3000`; Node reads `RAG_API_URL=http://localhost:8000/chat` from `.env` and forwards the request to FastAPI. No chat request is sent to Render in local mode.
+
+The Python service sends a server-side request to TranscriptAPI.com with `TRANSCRIPT_API_KEY` as a Bearer token. Keep this key in the root `.env` locally and in the Python RAG service environment on Render. The key is never sent to the extension or Node API.
+
+### Demo usage and switching
+
+Set `mode` to `"demo"` in `extension/config.js`. The extension then calls the existing Render Node API at `https://youtube-chat-api-siqa.onrender.com`. The deployed Node service retains its `RAG_API_URL` setting for `https://youtube-chat-rag.onrender.com/chat`.
+
+After changing the mode or either URL, save `extension/config.js` and reload the unpacked extension in `chrome://extensions`. No build is needed. Changing the local `.env` requires restarting the affected local service. Switching extension modes does not require a source edit to `popup.js` or a Render redeploy.
 
 ---
 
@@ -399,7 +405,7 @@ The extension only needs access to the active tab and the deployed Node API. It 
 
 ## POST `/api/chat`
 
-The Chrome extension sends questions to the Node.js backend. In the deployed extension, `API_BASE_URL` in `extension/popup.js` must match the public Node service URL.
+The Chrome extension sends questions to the Node.js backend selected by `extension/config.js`.
 
 ### Request
 

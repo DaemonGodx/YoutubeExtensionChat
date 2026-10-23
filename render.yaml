@@ -13,7 +13,7 @@ services:
         sync: false
       - key: GOOGLE_API_KEY
         sync: false
-      - key: TRANSCRIPT_PROXY_URL
+      - key: TRANSCRIPT_API_KEY
         sync: false
 
   - type: web

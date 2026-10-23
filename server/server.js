@@ -1,75 +1,91 @@
 const express = require("express");
 const cors = require("cors");
 const axios = require("axios");
-require("dotenv").config();
+const path = require("path");
+require("dotenv").config({ path: path.resolve(__dirname, "../.env") });
 
-const app = express();
-const ragHostport = process.env.RAG_API_HOSTPORT || "127.0.0.1:8000";
-const ragApiUrl = process.env.RAG_API_URL || `http://${ragHostport}/chat`;
+function resolveRagApiUrl(env = process.env) {
+    const configuredUrl = env.RAG_API_URL?.trim();
+    if (configuredUrl) return configuredUrl;
 
-app.use(cors());
-app.use(express.json({ limit: "5mb" }));
+    const ragHostport = env.RAG_API_HOSTPORT || "127.0.0.1:8000";
+    return `http://${ragHostport}/chat`;
+}
 
+function createApp({ axiosClient = axios, env = process.env } = {}) {
+    const app = express();
+    const ragApiUrl = resolveRagApiUrl(env);
 
-app.get("/", (req, res) => {
+    app.use(cors());
+    app.use(express.json({ limit: "5mb" }));
 
-    res.json({
-        message: "YouTube Chat Node API is running"
+    app.get("/", (req, res) => {
+
+        res.json({
+            message: "YouTube Chat Node API is running"
+        });
+
     });
 
-});
 
+    app.post("/api/chat", async (req, res) => {
 
-app.post("/api/chat", async (req, res) => {
+        try {
 
-    try {
+            const { videoId, question, transcript } = req.body;
 
-        const { videoId, question, transcript } = req.body;
+            if (!videoId || !question) {
 
-        if (!videoId || !question) {
+                return res.status(400).json({
+                    error: "videoId and question are required"
+                });
 
-            return res.status(400).json({
-                error: "videoId and question are required"
+            }
+
+            const ragRequest = {
+                video_id: videoId,
+                question: question
+            };
+            if (typeof transcript === "string" && transcript.trim()) {
+                ragRequest.transcript = transcript;
+            }
+
+            const response = await axiosClient.post(
+                ragApiUrl,
+                ragRequest
+            );
+
+            res.json({
+                answer: response.data.answer
+            });
+
+        } catch (error) {
+
+            console.error("RAG request failed:", error.response?.data || error.message);
+
+            res.status(500).json({
+                error: error.response?.data?.detail || "Failed to get answer"
             });
 
         }
 
-        const ragRequest = {
-            video_id: videoId,
-            question: question
-        };
-        if (typeof transcript === "string" && transcript.trim()) {
-            ragRequest.transcript = transcript;
-        }
+    });
 
-        const response = await axios.post(
-            ragApiUrl,
-            ragRequest
-        );
 
-        res.json({
-            answer: response.data.answer
-        });
-
-    } catch (error) {
-
-        console.error("RAG request failed:", error.response?.data || error.message);
-
-        res.status(500).json({
-            error: error.response?.data?.detail || "Failed to get answer"
-        });
-
-    }
-
-});
+    return app;
+}
 
 
 const port = process.env.PORT || 3000;
 
-app.listen(port, "0.0.0.0", () => {
+if (require.main === module) {
+    createApp().listen(port, "0.0.0.0", () => {
 
-    console.log(
-        `Node server running on port ${port}`
-    );
+        console.log(
+            `Node server running on port ${port}`
+        );
 
-});
+    });
+}
+
+module.exports = { createApp, resolveRagApiUrl };

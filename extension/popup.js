@@ -1,5 +1,4 @@
 let videoId = null;
-const API_BASE_URL = "https://youtube-chat-api-siqa.onrender.com";
 
 
 function getVideoId(url) {
@@ -35,7 +34,8 @@ async function askQuestion() {
     addMessage("AI", "Thinking...");
 
     try {
-        const response = await fetch(`${API_BASE_URL}/api/chat`, {
+        const apiBaseUrl = YouTubeChatConfig.resolveApiBaseUrl();
+        const response = await fetch(`${apiBaseUrl}/api/chat`, {
             method: "POST",
             headers: {
                 "Content-Type": "application/json"

@@ -1,20 +1,13 @@
 import logging
 import os
 import re
+from pathlib import Path
 
-from youtube_transcript_api import YouTubeTranscriptApi
-from youtube_transcript_api._errors import (
-    InvalidVideoId,
-    IpBlocked,
-    NoTranscriptFound,
-    RequestBlocked,
-    TranscriptsDisabled,
-    VideoUnavailable,
-)
-from youtube_transcript_api.proxies import GenericProxyConfig
-from requests.exceptions import ConnectionError as RequestsConnectionError
-from requests.exceptions import HTTPError as RequestsHTTPError
-from requests.exceptions import ProxyError, Timeout as RequestsTimeout
+from dotenv import load_dotenv
+
+load_dotenv(Path(__file__).resolve().parents[1] / ".env")
+
+import requests
 
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_community.vectorstores import Chroma
@@ -62,46 +55,59 @@ logger = logging.getLogger(__name__)
 
 
 class TranscriptFetchError(RuntimeError):
-    """A transcript retrieval failure with a safe, non-secret diagnostic."""
+    """A transcript provider failure with a safe, user-facing diagnostic."""
 
-    def __init__(self, category, message):
+    def __init__(self, category, message, status_code=502):
         super().__init__(message)
         self.category = category
+        self.status_code = status_code
 
 
-def create_transcript_api():
+TRANSCRIPT_API_URL = "https://transcriptapi.com/api/v2/youtube/transcript"
+TRANSCRIPT_API_TIMEOUT_SECONDS = 30
 
-    proxy_url = os.getenv("TRANSCRIPT_PROXY_URL")
-    if proxy_url:
-        return YouTubeTranscriptApi(
-            proxy_config=GenericProxyConfig(
-                http_url=proxy_url,
-                https_url=proxy_url,
-            )
+
+def _raise_transcript_fetch_error(category, message, status_code=502):
+    # Only log the safe category; never include provider response bodies or headers.
+    logger.warning("Transcript retrieval failed [%s]", category)
+    raise TranscriptFetchError(category, message, status_code) from None
+
+
+def _normalize_transcript(response_data):
+    if not isinstance(response_data, dict):
+        _raise_transcript_fetch_error(
+            "transcript_invalid_response",
+            "TranscriptAPI returned an invalid response. Please try again later.",
         )
 
-    return YouTubeTranscriptApi()
+    transcript = response_data.get("transcript")
+    if isinstance(transcript, str):
+        transcript_text = transcript
+    elif isinstance(transcript, list):
+        segments = []
+        for segment in transcript:
+            if not isinstance(segment, dict) or not isinstance(segment.get("text"), str):
+                _raise_transcript_fetch_error(
+                    "transcript_invalid_response",
+                    "TranscriptAPI returned malformed transcript segments.",
+                )
+            segments.append(segment["text"])
+        transcript_text = " ".join(segments)
+    else:
+        _raise_transcript_fetch_error(
+            "transcript_invalid_response",
+            "TranscriptAPI did not return transcript text in a supported format.",
+        )
 
+    transcript_text = re.sub(r"[\u200b\u200c\u200d\ufeff]", "", transcript_text)
+    transcript_text = " ".join(transcript_text.split())
+    if not transcript_text:
+        _raise_transcript_fetch_error(
+            "transcript_empty",
+            "The provider returned an empty transcript for this video.",
+        )
 
-def _proxy_authentication_failed(error):
-
-    response = getattr(error, "response", None)
-    if getattr(response, "status_code", None) == 407:
-        return True
-
-    # requests/urllib3 may expose a 407 only in nested exception text. Inspect it
-    # for classification, but never log or return that text (it can contain the URL).
-    try:
-        message = str(error).lower()
-    except Exception:
-        return False
-    return "407" in message and ("auth" in message or "proxy" in message)
-
-
-def _raise_transcript_fetch_error(category, message):
-
-    logger.warning("Transcript retrieval failed [%s]: %s", category, message)
-    raise TranscriptFetchError(category, message) from None
+    return transcript_text
 
 
 # -----------------------------
@@ -109,104 +115,73 @@ def _raise_transcript_fetch_error(category, message):
 # -----------------------------
 
 def get_transcript(video_id):
+    api_key = os.getenv("TRANSCRIPT_API_KEY", "").strip()
+    if not api_key:
+        _raise_transcript_fetch_error(
+            "transcript_api_not_configured",
+            "Transcript retrieval is not configured. Set TRANSCRIPT_API_KEY in the Python service environment.",
+            status_code=500,
+        )
 
     try:
-        ytt_api = create_transcript_api()
-        transcript_list = ytt_api.fetch(
-            video_id,
-            languages=["en"]
+        response = requests.get(
+            TRANSCRIPT_API_URL,
+            params={"video_url": video_id, "format": "json"},
+            headers={"Authorization": f"Bearer {api_key}"},
+            timeout=TRANSCRIPT_API_TIMEOUT_SECONDS,
         )
-    except IpBlocked:
+    except requests.Timeout:
         _raise_transcript_fetch_error(
-            "youtube_ip_blocked",
-            "YouTube blocked the configured outbound IP. The proxy IP may also be blocked."
+            "transcript_provider_timeout",
+            "TranscriptAPI took too long to respond. Please retry in a few seconds.",
         )
-    except RequestBlocked:
+    except requests.ConnectionError:
         _raise_transcript_fetch_error(
-            "youtube_request_blocked",
-            "YouTube blocked the transcript request."
+            "transcript_provider_connection",
+            "Could not connect to TranscriptAPI. Please try again later.",
         )
-    except RequestsHTTPError as error:
-        if _proxy_authentication_failed(error):
-            _raise_transcript_fetch_error(
-                "proxy_authentication",
-                "The configured transcript proxy rejected authentication. Check TRANSCRIPT_PROXY_URL in the service environment."
-            )
+    except requests.RequestException:
         _raise_transcript_fetch_error(
-            "transcript_http_error",
-            "The transcript service returned an HTTP error."
-        )
-    except ProxyError as error:
-        if _proxy_authentication_failed(error):
-            _raise_transcript_fetch_error(
-                "proxy_authentication",
-                "The configured transcript proxy rejected authentication. Check TRANSCRIPT_PROXY_URL in the service environment."
-            )
-        _raise_transcript_fetch_error(
-            "proxy_connection",
-            "Could not connect through the configured transcript proxy. Check its URL and availability."
-        )
-    except (RequestsConnectionError, RequestsTimeout):
-        if os.getenv("TRANSCRIPT_PROXY_URL"):
-            _raise_transcript_fetch_error(
-                "proxy_connection",
-                "The transcript network connection failed. Check the configured proxy and network availability."
-            )
-        _raise_transcript_fetch_error(
-            "transcript_connection",
-            "The direct transcript network connection failed."
-        )
-    except TranscriptsDisabled:
-        _raise_transcript_fetch_error(
-            "captions_disabled",
-            "Captions are disabled for this video."
-        )
-    except NoTranscriptFound:
-        _raise_transcript_fetch_error(
-            "transcript_missing",
-            "No English transcript is available for this video."
-        )
-    except InvalidVideoId:
-        _raise_transcript_fetch_error(
-            "invalid_video_id",
-            "The supplied YouTube video ID is invalid."
-        )
-    except VideoUnavailable:
-        _raise_transcript_fetch_error(
-            "video_unavailable",
-            "The YouTube video is unavailable."
-        )
-    except Exception:
-        _raise_transcript_fetch_error(
-            "transcript_api_failure",
-            "The transcript service returned an unexpected error."
+            "transcript_provider_request",
+            "The transcript provider request failed. Please try again later.",
         )
 
-    transcript_list = transcript_list.to_raw_data()
+    status_errors = {
+        401: ("transcript_api_auth", "TranscriptAPI rejected the API key. Check TRANSCRIPT_API_KEY."),
+        402: ("transcript_api_credits", "TranscriptAPI requires payment or has no credits remaining."),
+        404: ("transcript_unavailable", "No transcript is available for this video."),
+        422: ("transcript_invalid_video", "TranscriptAPI rejected the supplied YouTube video ID or URL."),
+        500: ("transcript_provider_failure", "TranscriptAPI encountered an error. Please try again later."),
+    }
+    if response.status_code == 429:
+        retry_after = response.headers.get("Retry-After", "5")
+        if not retry_after.isdigit():
+            retry_after = "5"
+        _raise_transcript_fetch_error(
+            "transcript_api_rate_limited",
+            f"TranscriptAPI is rate limiting requests. Please retry in {retry_after} seconds.",
+        )
+    if response.status_code == 408:
+        _raise_transcript_fetch_error(
+            "transcript_provider_timeout",
+            "TranscriptAPI temporarily timed out. Please retry in a few seconds.",
+        )
+    if response.status_code != 200:
+        category, message = status_errors.get(
+            response.status_code,
+            ("transcript_provider_failure", "TranscriptAPI returned an unexpected error. Please try again later."),
+        )
+        _raise_transcript_fetch_error(category, message)
 
-    cleaned_transcript = []
-
-    for chunk in transcript_list:
-
-        text = chunk["text"]
-
-        # Remove zero-width characters
-        text = re.sub(
-            r"[\u200b\u200c\u200d\ufeff]",
-            "",
-            text
+    try:
+        response_data = response.json()
+    except (ValueError, requests.exceptions.JSONDecodeError):
+        _raise_transcript_fetch_error(
+            "transcript_invalid_json",
+            "TranscriptAPI returned an invalid response. Please try again later.",
         )
 
-        # Normalize whitespace
-        text = " ".join(text.split())
-
-        cleaned_transcript.append({
-            "text": text,
-            "start": chunk["start"],
-            "duration": chunk["duration"]
-        })
-
-    return cleaned_transcript
+    return _normalize_transcript(response_data)
 
 
 # -----------------------------
@@ -226,8 +201,7 @@ def create_vector_store(video_id, transcript_text=None):
     print(f"Creating vector store for {video_id}")
 
     if transcript_text is None:
-        transcript_list = get_transcript(video_id)
-        transcript = " ".join(chunk["text"] for chunk in transcript_list)
+        transcript = get_transcript(video_id)
     else:
         transcript = transcript_text
 

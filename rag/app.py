@@ -1,7 +1,7 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 
-from .main import ask_question
+from .main import TranscriptFetchError, ask_question
 
 
 app = FastAPI()
@@ -25,11 +25,17 @@ def root():
 @app.post("/chat")
 def chat(request: ChatRequest):
 
-    answer = ask_question(
-        request.video_id,
-        request.question,
-        request.transcript
-    )
+    try:
+        answer = ask_question(
+            request.video_id,
+            request.question,
+            request.transcript
+        )
+    except TranscriptFetchError as error:
+        raise HTTPException(
+            status_code=error.status_code,
+            detail=str(error),
+        ) from None
 
     return {
         "answer": answer
