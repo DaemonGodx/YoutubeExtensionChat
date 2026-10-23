@@ -52,10 +52,37 @@ async function getTranscript() {
             world: "MAIN",
             func: async () => {
                 try {
-                    const playerResponse = window.ytInitialPlayerResponse;
-                    if (!playerResponse) {
-                        return { error: "YouTube has not loaded the video details yet. Refresh the video page and try again." };
+                    const readTranscriptPanel = () => {
+                        const segments = Array.from(document.querySelectorAll(
+                            "ytd-transcript-segment-renderer .segment-text, .segment-text"
+                        ));
+                        return segments
+                            .map((element) => element.innerText?.trim() || element.textContent?.trim())
+                            .filter(Boolean);
+                    };
+
+                    // Prefer the transcript YouTube has already rendered. This also works
+                    // when the player response currently belongs to a pre-roll ad.
+                    let lines = readTranscriptPanel();
+                    if (!lines.length) {
+                        const transcriptButton = Array.from(document.querySelectorAll("button"))
+                            .find((button) => /show transcript/i.test(button.innerText || button.getAttribute("aria-label") || ""));
+                        transcriptButton?.click();
+
+                        // YouTube loads transcript segments asynchronously after opening the panel.
+                        const deadline = Date.now() + 8000;
+                        while (!lines.length && Date.now() < deadline) {
+                            await new Promise((resolve) => setTimeout(resolve, 200));
+                            lines = readTranscriptPanel();
+                        }
                     }
+
+                    if (lines.length) {
+                        return { body: lines.join(" ") };
+                    }
+
+                    const player = document.getElementById("movie_player");
+                    const playerResponse = player?.getPlayerResponse?.() || window.ytInitialPlayerResponse;
 
                     const tracks =
                         playerResponse
@@ -64,7 +91,7 @@ async function getTranscript() {
                             ?.captionTracks;
 
                     if (!tracks?.length) {
-                        return { error: "This video does not expose captions. Check that captions are available in YouTube, then retry." };
+                        return { error: "YouTube did not expose a transcript for this video. Open the video's Transcript panel and retry." };
                     }
 
                     const track =
@@ -105,10 +132,16 @@ async function getTranscript() {
                 .map((segment) => segment.utf8?.trim())
                 .filter(Boolean);
         } catch {
-            const doc = new DOMParser().parseFromString(body, "text/xml");
-            lines = Array.from(doc.querySelectorAll("text, p"))
-                .map((element) => element.textContent?.trim())
-                .filter(Boolean);
+            // A rendered YouTube transcript is already plain text; otherwise parse
+            // the XML caption response in the extension context (Trusted Types safe).
+            if (!body.includes("<")) {
+                lines = [body.trim()];
+            } else {
+                const doc = new DOMParser().parseFromString(body, "text/xml");
+                lines = Array.from(doc.querySelectorAll("text, p"))
+                    .map((element) => element.textContent?.trim())
+                    .filter(Boolean);
+            }
         }
 
         if (!lines.length) {
