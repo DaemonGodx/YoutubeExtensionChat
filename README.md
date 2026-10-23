@@ -1,8 +1,8 @@
 # 🎥 YouTube RAG Chat
 
-An AI-powered Chrome Extension that lets you **chat with YouTube videos** using Retrieval-Augmented Generation (RAG).
+An AI-powered Chrome Extension that lets you **ask questions about YouTube videos** using Retrieval-Augmented Generation (RAG).
 
-Ask questions about a video's transcript and get context-aware answers. The extension also supports normal conversations and can handle different transcript languages.
+The Python backend retrieves the video's transcript from TranscriptAPI.com, then uses Gemini embeddings (`models/gemini-embedding-001`), Chroma retrieval, and Groq (`openai/gpt-oss-120b`) to answer questions based on that transcript.
 
 ---
 
@@ -12,8 +12,8 @@ Ask questions about a video's transcript and get context-aware answers. The exte
 - 🤖 AI-powered answers using RAG
 - 🔎 Semantic search over video transcripts
 - 🧠 Context-aware question answering
-- 💬 General conversation support
-- 🌐 Support for transcripts in multiple languages
+- 📝 Transcript retrieval through TranscriptAPI.com
+- 🌐 Uses the language selected by TranscriptAPI's default behavior
 - ⚡ Vector store caching for repeated questions
 - 🧩 Chrome Extension interface
 - 🔌 Node.js API gateway
@@ -42,8 +42,8 @@ Ask questions about a video's transcript and get context-aware answers. The exte
 ┌──────────────────────────────┐
 │       Python / FastAPI       │
 │                              │
-│ Chunk → Embed → Retrieve     │
-│        → Groq LLM            │
+│ TranscriptAPI → Chunk        │
+│ Gemini → Chroma → Groq       │
 └──────────────────────────────┘
 ```
 
@@ -59,19 +59,25 @@ YoutubeChat/
 │   ├── app.py
 │   └── main.py
 │
-├── node/
-│   ├── server.js
-│   
-│   
-│ 
+├── server/
+│   └── server.js
 │
 ├── extension/
+│   ├── config.js
 │   ├── manifest.json
 │   ├── popup.html
 │   ├── popup.css
 │   └── popup.js
 │
+├── tests/
+│   ├── environment_config.test.js
+│   └── test_transcript_api.py
+├── package.json
+├── package-lock.json
+├── render.yaml
+├── requirements.txt
 ├── .gitignore
+├── .env.example
 └── README.md
 ```
 
@@ -120,7 +126,7 @@ chunk_overlap = 200
 
 ### 4. Generate Embeddings
 
-Each chunk is converted into a vector representation using a sentence-transformer embedding model.
+Each chunk is converted into a vector representation using Google Gemini embeddings (`models/gemini-embedding-001`).
 
 ```text
 Transcript Chunks
@@ -164,25 +170,18 @@ Question + Retrieved Context
 
 ---
 
-# 🔀 Question Routing
+# 🔀 Video Question Flow
 
-The system can distinguish between **video-related questions** and **general conversation**.
+The current pipeline answers questions using the selected video's transcript. It does not have a separate general-conversation route.
 
 ```text
-                User Question
-                      │
-                      ▼
-                LLM Router
-                 /       \
-                /         \
-           VIDEO           GENERAL
-             │                │
-             ▼                ▼
-       RAG Pipeline       General LLM
-             │                │
-             └───────┬────────┘
-                     ▼
-                  Answer
+User Question
+      ↓
+Transcript and vector store (fetched or cached)
+      ↓
+Gemini Embeddings → Chroma Retrieval
+      ↓
+Groq Answer
 ```
 
 ### Video Question
@@ -194,16 +193,6 @@ What are the main points discussed in this video?
 ```
 
 The system retrieves relevant transcript context before generating the answer.
-
-### General Question
-
-Example:
-
-```text
-Hello
-```
-
-The question is handled directly by the general conversation chain without querying the transcript.
 
 ---
 
@@ -229,7 +218,7 @@ The question is handled directly by the general conversation chain without query
 - FastAPI
 - LangChain
 - Chroma
-- Hugging Face Embeddings
+- Google Gemini Embeddings (`models/gemini-embedding-001`)
 - Groq
 - TranscriptAPI.com
 
@@ -284,7 +273,7 @@ pip install -r requirements.txt
 Use `.env.example` as a template for `.env` in the repository root. If you already have `.env`, keep it and add or update the listed settings instead of replacing it:
 
 ```powershell
-Copy-Item .env.example .env
+if (!(Test-Path .env)) { Copy-Item .env.example .env }
 ```
 
 Set `GOOGLE_API_KEY`, `GROQ_API_KEY`, and `TRANSCRIPT_API_KEY` in `.env`. The example also sets `PORT=3000` and `RAG_API_URL=http://localhost:8000/chat`, so the local Node service forwards to the local Python service. Both services load the root `.env`. Never commit `.env`; it is ignored by Git.
@@ -318,6 +307,7 @@ http://localhost:8000/docs
 From the project root, start the server:
 
 ```bash
+npm ci
 npm start
 ```
 
@@ -346,7 +336,7 @@ To deploy:
 
 The Blueprint uses Render's free service plan. Free services can spin down when idle, so the first request after inactivity may take longer.
 
-Render may be unable to retrieve some YouTube transcripts because YouTube blocks requests from cloud-provider IPs. The extension can still reach the deployed services even when a transcript request fails.
+Transcript retrieval is handled by TranscriptAPI.com rather than a direct YouTube request from Render. Provider errors, missing captions, rate limits, or exhausted credits can still prevent a transcript from being returned.
 
 ## Local and Demo Modes
 
@@ -366,7 +356,7 @@ mode: "local", // or "demo"
 
 The extension calls `http://localhost:3000`; Node reads `RAG_API_URL=http://localhost:8000/chat` from `.env` and forwards the request to FastAPI. No chat request is sent to Render in local mode.
 
-The Python service sends a server-side request to TranscriptAPI.com with `TRANSCRIPT_API_KEY` as a Bearer token. Keep this key in the root `.env` locally and in the Python RAG service environment on Render. The key is never sent to the extension or Node API.
+The Python service sends a server-side request to TranscriptAPI.com with `TRANSCRIPT_API_KEY` as a Bearer token. It normalizes the provider's transcript segments or text into a plain string before chunking. Keep the key in the root `.env` locally and in the Python RAG service environment on Render. It is never sent to the extension or Node API.
 
 ### Demo usage and switching
 
@@ -376,28 +366,13 @@ After changing the mode or either URL, save `extension/config.js` and reload the
 
 ---
 
-# 🧩 6. Load the Chrome Extension
+# 🧩 6. Download and Use the Chrome Extension
 
-1. Open Google Chrome.
-2. Go to:
+| Download and install | Use the extension |
+| --- | --- |
+| Open the [GitHub repository](https://github.com/DaemonGodx/YoutubeExtensionChat), select **Code → Download ZIP**, and extract it. In Chrome, open `chrome://extensions`, enable **Developer mode**, click **Load unpacked**, and select the extracted `extension/` folder. | The checked-in mode is `demo`. To use local services, change `mode` to `"local"` in `extension/config.js` and start the Python and Node services. Open a YouTube video, click the extension, and ask a question. After changing the mode, save the file and click the extension’s refresh icon at `chrome://extensions`. |
 
-```text
-chrome://extensions
-```
-
-3. Enable **Developer mode**.
-4. Click **Load unpacked**.
-5. Select the project's:
-
-```text
-extension/
-```
-
-folder.
-
-The extension should now appear in your Chrome extensions list.
-
-The extension only needs access to the active tab and the deployed Node API. It does not read page captions directly.
+The extension uses the active YouTube tab to get the video ID. It sends the question to the Node API selected in `extension/config.js`; it does not read captions from the page.
 
 ---
 
@@ -475,27 +450,9 @@ Answer
 
 ---
 
-# 🌐 Multilingual Support
+# 🌐 Transcript Languages
 
-The system can work with transcripts available in languages supported by YouTube's transcript system.
-
-For example:
-
-```text
-Hindi Video
-     ↓
-Hindi Transcript
-     ↓
-Embeddings
-     ↓
-Vector Search
-     ↓
-LLM
-     ↓
-Answer
-```
-
-Multilingual embedding models can be used to improve retrieval quality across languages.
+The extension does not currently provide a language selector. Because the backend does not send a `language` parameter, TranscriptAPI uses its default language selection for each video.
 
 ---
 
@@ -546,13 +503,14 @@ The project currently supports:
 
 - ✅ YouTube video detection
 - ✅ Transcript retrieval
+- ✅ TranscriptAPI.com integration
 - ✅ Transcript cleaning
 - ✅ Text chunking
 - ✅ Embedding generation
+- ✅ Google Gemini embeddings
 - ✅ Chroma vector search
 - ✅ RAG-based question answering
-- ✅ General conversation
-- ✅ LLM-based question routing
+- ✅ Groq answer generation
 - ✅ Node.js API gateway
 - ✅ FastAPI backend
 - ✅ Chrome Extension UI
