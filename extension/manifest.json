@@ -9,6 +9,7 @@
     ],
 
     "host_permissions": [
+        "https://youtube-chat-api.onrender.com/*",
         "http://localhost:3000/*"
     ],
 

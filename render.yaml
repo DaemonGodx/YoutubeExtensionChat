@@ -1,0 +1,29 @@
+services:
+  - type: web
+    name: youtube-chat-rag
+    runtime: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn rag.app:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.11
+      - key: GROQ_API_KEY
+        sync: false
+      - key: GOOGLE_API_KEY
+        sync: false
+
+  - type: web
+    name: youtube-chat-api
+    runtime: node
+    plan: free
+    buildCommand: npm ci
+    startCommand: npm start
+    healthCheckPath: /
+    envVars:
+      - key: RAG_API_HOSTPORT
+        fromService:
+          type: web
+          name: youtube-chat-rag
+          property: hostport

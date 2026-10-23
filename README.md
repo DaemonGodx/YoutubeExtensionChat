@@ -295,17 +295,17 @@ pip install -r requirements.txt
 
 # 🔐 3. Configure Environment Variables
 
-Create:
+Create a `.env` file in the project root:
 
 ```text
-node/.env
+.env
 ```
 
 Add your API credentials:
 
 ```env
 GROQ_API_KEY=your_groq_api_key
-HUGGINGFACEHUB_API_TOKEN=your_huggingface_token
+GOOGLE_API_KEY=your_google_ai_studio_api_key
 ```
 
 Never commit your `.env` file.
@@ -313,12 +313,12 @@ Never commit your `.env` file.
 You can provide a safe example file such as:
 
 ```text
-node/.env.example
+.env.example
 ```
 
 ```env
 GROQ_API_KEY=
-HUGGINGFACEHUB_API_TOKEN=
+GOOGLE_API_KEY=
 ```
 
 ---
@@ -347,22 +347,10 @@ http://localhost:8000/docs
 
 # 🟢 5. Start the Node.js Server
 
-Open another terminal:
+From the project root, start the server:
 
 ```bash
-cd node
-```
-
-Install dependencies:
-
-```bash
-npm install
-```
-
-Start the server:
-
-```bash
-node server.js
+npm start
 ```
 
 The Node.js API will run at:
@@ -370,6 +358,25 @@ The Node.js API will run at:
 ```text
 http://localhost:3000
 ```
+
+---
+
+# ☁️ Deploy to Render
+
+The repository includes a Render Blueprint (`render.yaml`) that creates two web services:
+
+- `youtube-chat-rag` runs the FastAPI and RAG backend.
+- `youtube-chat-api` runs the public Node.js API and connects to the Python service over Render's private network.
+
+To deploy:
+
+1. Push this repository, including `render.yaml`, to a Git provider connected to Render.
+2. In the Render Dashboard, choose **New → Blueprint**, connect the repository, and apply the Blueprint.
+3. Enter your `GROQ_API_KEY` and `GOOGLE_API_KEY` when prompted. These are required by the chat and embedding models.
+4. Wait for both services to finish deploying. The public API URL is `https://youtube-chat-api.onrender.com` unless Render reports a different hostname.
+5. If Render assigned a different hostname, update `API_BASE_URL` in `extension/popup.js` and the matching host permission in `extension/manifest.json`, push the changes, and reload the unpacked extension in Chrome.
+
+The Blueprint uses Render's free service plan. Free services can spin down when idle, so the first request after inactivity may take longer.
 
 ---
 
@@ -400,7 +407,7 @@ The extension should now appear in your Chrome extensions list.
 
 ## POST `/api/chat`
 
-The Chrome extension sends questions to the Node.js backend.
+The Chrome extension sends questions to the Node.js backend. In the deployed extension, `API_BASE_URL` in `extension/popup.js` must match the public Node service URL.
 
 ### Request
 
@@ -416,7 +423,7 @@ The Chrome extension sends questions to the Node.js backend.
 The Node.js server forwards the request to:
 
 ```text
-POST http://localhost:8000/chat
+POST `/chat` on the RAG backend (localhost in development, or Render's private network in production)
 ```
 
 using:

@@ -4,6 +4,8 @@ const axios = require("axios");
 require("dotenv").config();
 
 const app = express();
+const ragHostport = process.env.RAG_API_HOSTPORT || "127.0.0.1:8000";
+const ragApiUrl = process.env.RAG_API_URL || `http://${ragHostport}/chat`;
 
 app.use(cors());
 app.use(express.json());
@@ -33,7 +35,7 @@ app.post("/api/chat", async (req, res) => {
         }
 
         const response = await axios.post(
-            "http://127.0.0.1:8000/chat",
+            ragApiUrl,
             {
                 video_id: videoId,
                 question: question
@@ -57,10 +59,12 @@ app.post("/api/chat", async (req, res) => {
 });
 
 
-app.listen(3000, () => {
+const port = process.env.PORT || 3000;
+
+app.listen(port, "0.0.0.0", () => {
 
     console.log(
-        "Node server running on http://localhost:3000"
+        `Node server running on port ${port}`
     );
 
 });

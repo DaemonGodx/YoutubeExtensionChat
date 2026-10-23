@@ -1,4 +1,5 @@
 let videoId = null;
+const API_BASE_URL = "https://youtube-chat-api.onrender.com";
 
 
 function getVideoId(url) {
@@ -56,7 +57,7 @@ async function askQuestion() {
     try {
 
         const response = await fetch(
-            "http://localhost:3000/api/chat",
+            `${API_BASE_URL}/api/chat`,
             {
                 method: "POST",
 
