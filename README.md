@@ -292,6 +292,7 @@ Add your API credentials:
 ```env
 GROQ_API_KEY=your_groq_api_key
 GOOGLE_API_KEY=your_google_ai_studio_api_key
+TRANSCRIPT_PROXY_URL=
 ```
 
 Never commit your `.env` file.
@@ -305,6 +306,7 @@ You can provide a safe example file such as:
 ```env
 GROQ_API_KEY=
 GOOGLE_API_KEY=
+TRANSCRIPT_PROXY_URL=
 ```
 
 ---
@@ -358,11 +360,13 @@ To deploy:
 
 1. Push this repository, including `render.yaml`, to a Git provider connected to Render.
 2. In the Render Dashboard, choose **New → Blueprint**, connect the repository, and apply the Blueprint.
-3. Enter your `GROQ_API_KEY` and `GOOGLE_API_KEY` when prompted. These are required by the chat and embedding models.
+3. Enter your `GROQ_API_KEY` and `GOOGLE_API_KEY` when prompted. These are required by the chat and embedding models. `TRANSCRIPT_PROXY_URL` is optional; set it to the authenticated proxy URL in Render's environment settings if using a proxy. Leave it blank for direct connections. Never commit the authenticated URL.
 4. Wait for both services to finish deploying. The public API URL is `https://youtube-chat-api.onrender.com` unless Render reports a different hostname.
 5. If Render assigned a different hostname, update `API_BASE_URL` in `extension/popup.js` and the matching host permission in `extension/manifest.json`, push the changes, and reload the unpacked extension in Chrome.
 
 The Blueprint uses Render's free service plan. Free services can spin down when idle, so the first request after inactivity may take longer.
+
+The Python service reads `TRANSCRIPT_PROXY_URL` when retrieving YouTube captions. It uses `youtube-transcript-api`'s `GenericProxyConfig` for both HTTP and HTTPS requests when the value is set. A proxy can still be blocked by YouTube; a successful deployment or unit test does not confirm that a particular proxy IP can retrieve captions.
 
 ---
 

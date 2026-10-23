@@ -13,6 +13,8 @@ services:
         sync: false
       - key: GOOGLE_API_KEY
         sync: false
+      - key: TRANSCRIPT_PROXY_URL
+        sync: false
 
   - type: web
     name: youtube-chat-api

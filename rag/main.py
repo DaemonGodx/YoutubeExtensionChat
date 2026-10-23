@@ -1,6 +1,20 @@
+import logging
+import os
 import re
 
 from youtube_transcript_api import YouTubeTranscriptApi
+from youtube_transcript_api._errors import (
+    InvalidVideoId,
+    IpBlocked,
+    NoTranscriptFound,
+    RequestBlocked,
+    TranscriptsDisabled,
+    VideoUnavailable,
+)
+from youtube_transcript_api.proxies import GenericProxyConfig
+from requests.exceptions import ConnectionError as RequestsConnectionError
+from requests.exceptions import HTTPError as RequestsHTTPError
+from requests.exceptions import ProxyError, Timeout as RequestsTimeout
 
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_community.vectorstores import Chroma
@@ -44,6 +58,50 @@ llm = ChatGroq(
 # -----------------------------
 
 vector_store_cache = {}
+logger = logging.getLogger(__name__)
+
+
+class TranscriptFetchError(RuntimeError):
+    """A transcript retrieval failure with a safe, non-secret diagnostic."""
+
+    def __init__(self, category, message):
+        super().__init__(message)
+        self.category = category
+
+
+def create_transcript_api():
+
+    proxy_url = os.getenv("TRANSCRIPT_PROXY_URL")
+    if proxy_url:
+        return YouTubeTranscriptApi(
+            proxy_config=GenericProxyConfig(
+                http_url=proxy_url,
+                https_url=proxy_url,
+            )
+        )
+
+    return YouTubeTranscriptApi()
+
+
+def _proxy_authentication_failed(error):
+
+    response = getattr(error, "response", None)
+    if getattr(response, "status_code", None) == 407:
+        return True
+
+    # requests/urllib3 may expose a 407 only in nested exception text. Inspect it
+    # for classification, but never log or return that text (it can contain the URL).
+    try:
+        message = str(error).lower()
+    except Exception:
+        return False
+    return "407" in message and ("auth" in message or "proxy" in message)
+
+
+def _raise_transcript_fetch_error(category, message):
+
+    logger.warning("Transcript retrieval failed [%s]: %s", category, message)
+    raise TranscriptFetchError(category, message) from None
 
 
 # -----------------------------
@@ -52,12 +110,77 @@ vector_store_cache = {}
 
 def get_transcript(video_id):
 
-    ytt_api = YouTubeTranscriptApi()
-
-    transcript_list = ytt_api.fetch(
-        video_id,
-        languages=["en"]
-    )
+    try:
+        ytt_api = create_transcript_api()
+        transcript_list = ytt_api.fetch(
+            video_id,
+            languages=["en"]
+        )
+    except IpBlocked:
+        _raise_transcript_fetch_error(
+            "youtube_ip_blocked",
+            "YouTube blocked the configured outbound IP. The proxy IP may also be blocked."
+        )
+    except RequestBlocked:
+        _raise_transcript_fetch_error(
+            "youtube_request_blocked",
+            "YouTube blocked the transcript request."
+        )
+    except RequestsHTTPError as error:
+        if _proxy_authentication_failed(error):
+            _raise_transcript_fetch_error(
+                "proxy_authentication",
+                "The configured transcript proxy rejected authentication. Check TRANSCRIPT_PROXY_URL in the service environment."
+            )
+        _raise_transcript_fetch_error(
+            "transcript_http_error",
+            "The transcript service returned an HTTP error."
+        )
+    except ProxyError as error:
+        if _proxy_authentication_failed(error):
+            _raise_transcript_fetch_error(
+                "proxy_authentication",
+                "The configured transcript proxy rejected authentication. Check TRANSCRIPT_PROXY_URL in the service environment."
+            )
+        _raise_transcript_fetch_error(
+            "proxy_connection",
+            "Could not connect through the configured transcript proxy. Check its URL and availability."
+        )
+    except (RequestsConnectionError, RequestsTimeout):
+        if os.getenv("TRANSCRIPT_PROXY_URL"):
+            _raise_transcript_fetch_error(
+                "proxy_connection",
+                "The transcript network connection failed. Check the configured proxy and network availability."
+            )
+        _raise_transcript_fetch_error(
+            "transcript_connection",
+            "The direct transcript network connection failed."
+        )
+    except TranscriptsDisabled:
+        _raise_transcript_fetch_error(
+            "captions_disabled",
+            "Captions are disabled for this video."
+        )
+    except NoTranscriptFound:
+        _raise_transcript_fetch_error(
+            "transcript_missing",
+            "No English transcript is available for this video."
+        )
+    except InvalidVideoId:
+        _raise_transcript_fetch_error(
+            "invalid_video_id",
+            "The supplied YouTube video ID is invalid."
+        )
+    except VideoUnavailable:
+        _raise_transcript_fetch_error(
+            "video_unavailable",
+            "The YouTube video is unavailable."
+        )
+    except Exception:
+        _raise_transcript_fetch_error(
+            "transcript_api_failure",
+            "The transcript service returned an unexpected error."
+        )
 
     transcript_list = transcript_list.to_raw_data()
 
