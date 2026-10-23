@@ -28,7 +28,7 @@ Ask questions about a video's transcript and get context-aware answers. The exte
 ┌──────────────────────────────┐
 │      Chrome Extension        │
 │                              │
-│ Captions + Popup Question   │
+│ Video ID + Popup Question   │
 └──────────────┬───────────────┘
                │ HTTP
                ▼
@@ -85,7 +85,7 @@ When you ask a question about a YouTube video, the system follows these steps:
 
 ### 1. Get YouTube Transcript
 
-The extension reads an available caption track from the active YouTube page and sends its text with the question. This avoids asking Render's cloud IP to fetch YouTube captions, which YouTube may block.
+The Python backend retrieves the transcript with `youtube-transcript-api` using the video ID sent by the extension.
 
 ```text
 YouTube Video
@@ -387,10 +387,7 @@ folder.
 
 The extension should now appear in your Chrome extensions list.
 
-The first time you ask a question about a video, Chrome will ask the extension
-for access to YouTube so it can read captions. Allow access; the video reloads
-once to attach the caption reader, then reopen the extension and your question
-will retry automatically.
+The extension only needs access to the active tab and the deployed Node API. It does not read page captions directly.
 
 ---
 
@@ -405,8 +402,7 @@ The Chrome extension sends questions to the Node.js backend. In the deployed ext
 ```json
 {
   "videoId": "VIDEO_ID",
-  "question": "What is this video about?",
-  "transcript": "Caption text read from the active YouTube page"
+  "question": "What is this video about?"
 }
 ```
 
@@ -423,8 +419,7 @@ using:
 ```json
 {
   "video_id": "VIDEO_ID",
-  "question": "What is this video about?",
-  "transcript": "Caption text read from the active YouTube page"
+  "question": "What is this video about?"
 }
 ```
 

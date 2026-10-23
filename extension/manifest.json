@@ -5,17 +5,12 @@
     "description": "Chat with YouTube videos using RAG",
 
     "permissions": [
-        "activeTab",
-        "scripting"
+        "activeTab"
     ],
 
     "host_permissions": [
         "https://youtube-chat-api-siqa.onrender.com/*",
         "http://localhost:3000/*"
-    ],
-
-    "optional_host_permissions": [
-        "https://www.youtube.com/*"
     ],
 
     "action": {

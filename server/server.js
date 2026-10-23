@@ -34,19 +34,17 @@ app.post("/api/chat", async (req, res) => {
 
         }
 
-        if (typeof transcript !== "string" || !transcript.trim()) {
-            return res.status(400).json({
-                error: "Transcript unavailable. Reload the extension on the YouTube video and try again."
-            });
+        const ragRequest = {
+            video_id: videoId,
+            question: question
+        };
+        if (typeof transcript === "string" && transcript.trim()) {
+            ragRequest.transcript = transcript;
         }
 
         const response = await axios.post(
             ragApiUrl,
-            {
-                video_id: videoId,
-                question: question,
-                transcript: transcript
-            }
+            ragRequest
         );
 
         res.json({
