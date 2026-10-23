@@ -387,6 +387,11 @@ folder.
 
 The extension should now appear in your Chrome extensions list.
 
+The first time you ask a question about a video, Chrome will ask the extension
+for access to YouTube so it can read captions. Allow access; the video reloads
+once to attach the caption reader, then reopen the extension and your question
+will retry automatically.
+
 ---
 
 # 🔌 API

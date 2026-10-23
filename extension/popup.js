@@ -2,6 +2,39 @@ let videoId = null;
 let activeTabId = null;
 let transcriptPromise = null;
 const API_BASE_URL = "https://youtube-chat-api-siqa.onrender.com";
+const YOUTUBE_ORIGIN = "https://www.youtube.com/*";
+const TRANSCRIPT_SCRIPT_ID = "youtube-chat-transcript-capture";
+
+
+async function ensureTranscriptAccess(permissionStatus) {
+    const granted = await permissionStatus;
+    if (!granted) {
+        throw new Error("Allow YouTube site access to read this video's transcript, then try again.");
+    }
+
+    const registered = await chrome.scripting.getRegisteredContentScripts({
+        ids: [TRANSCRIPT_SCRIPT_ID]
+    });
+    if (!registered.length) {
+        await chrome.scripting.registerContentScripts([{
+            id: TRANSCRIPT_SCRIPT_ID,
+            matches: ["https://www.youtube.com/*"],
+            js: ["youtube-shadow-roots.js"],
+            runAt: "document_start",
+            world: "MAIN",
+            persistAcrossSessions: false
+        }]);
+    }
+
+    const [hookState] = await chrome.scripting.executeScript({
+        target: { tabId: activeTabId },
+        world: "MAIN",
+        func: () => window.__youtubeChatHookInstalled === true
+    });
+
+    // The hook must run before YouTube creates its closed transcript roots.
+    return hookState?.result === true;
+}
 
 
 function getVideoId(url) {
@@ -52,11 +85,48 @@ async function getTranscript() {
             world: "MAIN",
             func: async () => {
                 try {
+                    const getOpenRoots = (start = document) => {
+                        const roots = [start];
+                        if (start === document && Array.isArray(window.__youtubeChatCapturedRoots)) {
+                            roots.push(...window.__youtubeChatCapturedRoots);
+                        }
+                        for (let index = 0; index < roots.length; index += 1) {
+                            const root = roots[index];
+                            const documentForRoot = root.nodeType === Node.DOCUMENT_NODE
+                                ? root
+                                : root.ownerDocument;
+                            const walker = documentForRoot.createTreeWalker(
+                                root,
+                                NodeFilter.SHOW_ELEMENT
+                            );
+                            let element = walker.nextNode();
+                            while (element) {
+                                if (element.shadowRoot) roots.push(element.shadowRoot);
+                                element = walker.nextNode();
+                            }
+                        }
+                        return roots;
+                    };
+
                     const readTranscriptPanel = () => {
-                        const segments = Array.from(document.querySelectorAll(
-                            "ytd-transcript-segment-renderer .segment-text, .segment-text"
-                        ));
-                        return segments
+                        const roots = getOpenRoots();
+                        const segmentHosts = roots.flatMap((root) =>
+                            Array.from(root.querySelectorAll("ytd-transcript-segment-renderer"))
+                        );
+
+                        if (segmentHosts.length) {
+                            return segmentHosts
+                                .map((host) => {
+                                    const segmentRoots = getOpenRoots(host);
+                                    const textElement = segmentRoots
+                                        .flatMap((root) => Array.from(root.querySelectorAll(".segment-text")))[0];
+                                    return textElement?.innerText?.trim() || textElement?.textContent?.trim();
+                                })
+                                .filter(Boolean);
+                        }
+
+                        return roots
+                            .flatMap((root) => Array.from(root.querySelectorAll(".segment-text")))
                             .map((element) => element.innerText?.trim() || element.textContent?.trim())
                             .filter(Boolean);
                     };
@@ -65,7 +135,8 @@ async function getTranscript() {
                     // when the player response currently belongs to a pre-roll ad.
                     let lines = readTranscriptPanel();
                     if (!lines.length) {
-                        const transcriptButton = Array.from(document.querySelectorAll("button"))
+                        const transcriptButton = getOpenRoots()
+                            .flatMap((root) => Array.from(root.querySelectorAll("button")))
                             .find((button) => /show transcript/i.test(button.innerText || button.getAttribute("aria-label") || ""));
                         transcriptButton?.click();
 
@@ -91,10 +162,11 @@ async function getTranscript() {
                             ?.captionTracks;
 
                     if (!tracks?.length) {
-                        return { error: "YouTube did not expose a transcript for this video. Open the video's Transcript panel and retry." };
+                        return { error: "No captions were available from YouTube. Open the video's Transcript panel and try again." };
                     }
 
                     const track =
+                        tracks.find((item) => item.languageCode === "en" && item.kind === "asr") ||
                         tracks.find((item) => item.languageCode === "en") ||
                         tracks[0];
                     const captionsUrl = new URL(track.baseUrl);
@@ -108,7 +180,13 @@ async function getTranscript() {
                         return { error: `YouTube captions returned HTTP ${response.status}.` };
                     }
 
-                    return { body: await response.text() };
+                    const captionBody = await response.text();
+                    if (!captionBody) {
+                        return {
+                            error: "YouTube returned an empty caption track. Open the video's Transcript panel and try again."
+                        };
+                    }
+                    return { body: captionBody };
                 } catch (error) {
                     return { error: error?.message || "YouTube caption extraction failed." };
                 }
@@ -121,7 +199,10 @@ async function getTranscript() {
 
         const body = result?.result?.body;
         if (typeof body !== "string" || !body) {
-            throw new Error(result?.result?.error || "Could not read captions from this video.");
+            throw new Error(
+                result?.result?.error ||
+                "YouTube returned an empty caption response. Try reopening the video and transcript, then retry."
+            );
         }
 
         let lines = [];
@@ -158,7 +239,7 @@ async function getTranscript() {
 }
 
 
-async function askQuestion() {
+async function askQuestion({ automaticRetry = false } = {}) {
 
     const input =
         document.getElementById("question");
@@ -166,6 +247,24 @@ async function askQuestion() {
     const question = input.value.trim();
 
     if (!question || !videoId) {
+        return;
+    }
+
+    try {
+        // Start the permission request synchronously in the user click handler.
+        // A retry after the one-time reload only checks the saved permission.
+        const permissionStatus = automaticRetry
+            ? chrome.permissions.contains({ origins: [YOUTUBE_ORIGIN] })
+            : chrome.permissions.request({ origins: [YOUTUBE_ORIGIN] });
+        const ready = await ensureTranscriptAccess(permissionStatus);
+        if (!ready) {
+            localStorage.setItem("youtube-chat-pending-question", question);
+            addMessage("AI", "YouTube access is enabled. The video is reloading so I can read its transcript. Reopen the extension and I’ll retry your question.");
+            window.setTimeout(() => chrome.tabs.reload(activeTabId), 700);
+            return;
+        }
+    } catch (error) {
+        addMessage("AI", error.message || "Could not enable YouTube transcript access.");
         return;
     }
 
@@ -282,4 +381,11 @@ document.querySelectorAll(".suggestion").forEach(button => {
     });
 });
 
-getCurrentVideo();
+getCurrentVideo().then(() => {
+    const pendingQuestion = localStorage.getItem("youtube-chat-pending-question");
+    if (pendingQuestion) {
+        localStorage.removeItem("youtube-chat-pending-question");
+        document.getElementById("question").value = pendingQuestion;
+        askQuestion({ automaticRetry: true });
+    }
+});
