@@ -6,6 +6,7 @@ from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_community.vectorstores import Chroma
 from langchain_huggingface import HuggingFaceEndpointEmbeddings
 from langchain_groq import ChatGroq
+from langchain_google_genai import ChatGoogleGenerativeAI
 
 from langchain_core.prompts import PromptTemplate
 from langchain_core.runnables import (
@@ -14,20 +15,28 @@ from langchain_core.runnables import (
     RunnablePassthrough
 )
 from langchain_core.output_parsers import StrOutputParser
+from langchain_google_genai import GoogleGenerativeAIEmbeddings
+
+embedding = GoogleGenerativeAIEmbeddings(
+    model="models/gemini-embedding-001",
+)
 
 
 # -----------------------------
 # Models
 # -----------------------------
 
-embedding = HuggingFaceEndpointEmbeddings(
-    model="sentence-transformers/all-MiniLM-L6-v2"
-)
+# embedding = HuggingFaceEndpointEmbeddings(
+#     model="hotchpotch/bekko-static-embedding-v1"
+# )
 
 llm = ChatGroq(
     model="openai/gpt-oss-120b",
     temperature=0.5
 )
+# llm=ChatGoogleGenerativeAI( 
+#     model="gemini-3.8-flash",
+#     temperature=1.0, )
 
 
 # -----------------------------
