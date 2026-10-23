@@ -51,44 +51,68 @@ async function getTranscript() {
             target: { tabId: activeTabId },
             world: "MAIN",
             func: async () => {
-                const tracks =
-                    window.ytInitialPlayerResponse
-                        ?.captions
-                        ?.playerCaptionsTracklistRenderer
-                        ?.captionTracks;
+                try {
+                    const playerResponse = window.ytInitialPlayerResponse;
+                    if (!playerResponse) {
+                        return { error: "YouTube has not loaded the video details yet. Refresh the video page and try again." };
+                    }
 
-                if (!tracks?.length) {
-                    throw new Error("This video has no available captions.");
+                    const tracks =
+                        playerResponse
+                            ?.captions
+                            ?.playerCaptionsTracklistRenderer
+                            ?.captionTracks;
+
+                    if (!tracks?.length) {
+                        return { error: "This video does not expose captions. Check that captions are available in YouTube, then retry." };
+                    }
+
+                    const track =
+                        tracks.find((item) => item.languageCode === "en") ||
+                        tracks[0];
+                    const captionsUrl = new URL(track.baseUrl);
+                    captionsUrl.searchParams.set("fmt", "json3");
+
+                    const response = await fetch(captionsUrl.toString(), {
+                        credentials: "include"
+                    });
+
+                    if (!response.ok) {
+                        return { error: `YouTube captions returned HTTP ${response.status}.` };
+                    }
+
+                    const body = await response.text();
+                    let lines = [];
+
+                    try {
+                        const captions = JSON.parse(body);
+                        lines = (captions.events || [])
+                            .flatMap((event) => event.segs || [])
+                            .map((segment) => segment.utf8?.trim())
+                            .filter(Boolean);
+                    } catch {
+                        const doc = new DOMParser().parseFromString(body, "text/xml");
+                        lines = Array.from(doc.querySelectorAll("text, p"))
+                            .map((element) => element.textContent?.trim())
+                            .filter(Boolean);
+                    }
+
+                    if (!lines.length) {
+                        return { error: "YouTube returned an empty caption track for this video." };
+                    }
+
+                    return { transcript: lines.join(" ") };
+                } catch (error) {
+                    return { error: error?.message || "YouTube caption extraction failed." };
                 }
-
-                const track =
-                    tracks.find((item) => item.languageCode === "en") ||
-                    tracks[0];
-                const response = await fetch(track.baseUrl, { credentials: "include" });
-
-                if (!response.ok) {
-                    throw new Error(`YouTube captions returned ${response.status}.`);
-                }
-
-                const xml = await response.text();
-                const doc = new DOMParser().parseFromString(xml, "text/xml");
-                const lines = Array.from(doc.querySelectorAll("text, p"))
-                    .map((element) => element.textContent?.trim())
-                    .filter(Boolean);
-
-                if (!lines.length) {
-                    throw new Error("No caption text was returned for this video.");
-                }
-
-                return lines.join(" ");
             }
         });
 
-        if (!result?.result) {
-            throw new Error("Could not read captions from this video.");
+        if (!result?.result?.transcript) {
+            throw new Error(result?.result?.error || "Could not read captions from this video.");
         }
 
-        return result.result;
+        return result.result.transcript;
     })().catch((error) => {
         transcriptPromise = null;
         throw error;
